@@ -1,0 +1,9 @@
+.next
+AGENTS.md
+CODEX-*.md
+coverage
+dist
+docs
+node_modules
+out
+package-lock.json
