@@ -13,6 +13,7 @@ import {
   NormalizedAiError,
   toPublicAiError,
 } from "@/lib/ai/errors";
+import { getProviderModel } from "@/lib/ai/config";
 import { ASSISTANT_INSTRUCTIONS_VERSION } from "@/lib/ai/instructions";
 import {
   normalizeAssistantResponse,
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
   const { provider, apiKey, messages } = result.data;
   const adapter = getProviderAdapter(provider);
   const requestId = crypto.randomUUID();
+  const startedAt = performance.now();
   const encoder = new TextEncoder();
 
   logDevelopmentDiagnostic({
@@ -57,6 +59,9 @@ export async function POST(request: Request) {
     adapter: provider,
     authenticationFailed: false,
     event: "adapter_selected",
+    model: getProviderModel(provider),
+    providerStatus: null,
+    durationMs: 0,
   });
 
   const stream = new ReadableStream<Uint8Array>({
@@ -109,10 +114,14 @@ export async function POST(request: Request) {
           requestId,
           provider,
           adapter: provider,
-          authenticationFailed:
-            publicError.code === "AI_AUTHENTICATION_FAILED" ||
-            publicError.code === "INVALID_API_KEY",
+          authenticationFailed: isAuthenticationError(publicError.code),
           event: "adapter_failed",
+          model: getProviderModel(provider),
+          providerStatus:
+            error instanceof NormalizedAiError
+              ? (error.providerStatus ?? null)
+              : null,
+          durationMs: Math.round(performance.now() - startedAt),
         });
         controller.enqueue(
           encoder.encode(serializeEvent({ type: "error", error: publicError })),
@@ -153,13 +162,20 @@ type DevelopmentDiagnostic = {
   provider: string;
   adapter: string;
   authenticationFailed: boolean;
+  durationMs: number;
   event: "adapter_selected" | "adapter_failed";
+  model: string;
+  providerStatus: number | null;
 };
 
 function logDevelopmentDiagnostic(diagnostic: DevelopmentDiagnostic) {
   if (process.env.NODE_ENV === "development") {
     console.info("AI provider diagnostic", diagnostic);
   }
+}
+
+function isAuthenticationError(code: AiErrorCode): boolean {
+  return code === "AI_AUTHENTICATION_FAILED" || code === "INVALID_API_KEY";
 }
 
 function serializeEvent(event: ChatStreamEvent): string {

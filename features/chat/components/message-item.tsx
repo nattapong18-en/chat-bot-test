@@ -70,7 +70,7 @@ export function MessageItem({
                       : message.errorCode === "AI_PROVIDER_TIMEOUT"
                         ? "ผู้ให้บริการตอบช้าเกินไป"
                         : message.errorCode === "AI_PROVIDER_UNAVAILABLE"
-                          ? "ผู้ให้บริการยังไม่พร้อมใช้งาน"
+                          ? "โมเดล Gemini ที่ระบบใช้ไม่พร้อมให้บริการ"
                           : "เกิดข้อผิดพลาด"}
               </p>
             )}

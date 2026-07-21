@@ -14,6 +14,7 @@ export class NormalizedAiError extends Error {
     readonly code: AiErrorCode,
     readonly status: number,
     readonly retryable: boolean,
+    readonly providerStatus?: number,
   ) {
     super(code);
     this.name = "NormalizedAiError";
@@ -57,7 +58,8 @@ const ERROR_MESSAGES: Record<ChatLanguage, Record<AiErrorCode, string>> = {
     MESSAGE_TOO_LONG: "ข้อความหรือบทสนทนายาวเกินกำหนดครับ",
     RATE_LIMITED:
       "มีการใช้งานผู้ให้บริการ AI มากเกินไป กรุณาลองใหม่ภายหลังครับ",
-    AI_PROVIDER_UNAVAILABLE: "ผู้ให้บริการ AI ยังไม่พร้อมใช้งานในขณะนี้ครับ",
+    AI_PROVIDER_UNAVAILABLE:
+      "ระบบต้องอัปเดตไปใช้โมเดล Gemini รุ่นใหม่ กรุณาลองอีกครั้งหลังจากอัปเดตระบบ",
     AI_PROVIDER_TIMEOUT: "ผู้ให้บริการ AI ใช้เวลาตอบนานเกินไปครับ",
     INVALID_AI_RESPONSE:
       "ไม่สามารถอ่านข้อความตอบกลับจากผู้ให้บริการ AI ได้ครับ",
@@ -103,48 +105,88 @@ function providerAuthenticationMessage(
 
 export function normalizeProviderError(
   error: unknown,
-  provider: AiProvider,
+  provider?: AiProvider,
 ): NormalizedAiError {
+  void provider;
+
   if (isAbortError(error)) {
     return new NormalizedAiError("INTERNAL_ERROR", 499, false);
   }
 
   const status = readNumericProperty(error, "status");
   const name = readStringProperty(error, "name");
-  const message = readStringProperty(error, "message").toLowerCase();
+  const message = readStringProperty(error, "message")
+    .toLowerCase()
+    .replaceAll(/[_-]/gu, " ");
 
-  if (
-    provider === "gemini" &&
-    /(reached a rate limit|quota exceeded|resource exhausted|set up billing|billing required|free-tier limit reached)/u.test(
-      message,
-    )
-  ) {
-    return new NormalizedAiError("AI_PROVIDER_QUOTA_EXCEEDED", 429, false);
-  }
   if (
     /(not valid for (the )?selected provider|wrong provider)/u.test(message)
   ) {
-    return new NormalizedAiError("PROVIDER_KEY_MISMATCH", 401, false);
+    return new NormalizedAiError("PROVIDER_KEY_MISMATCH", 401, false, status);
   }
 
   if (
+    (status === 400 && hasInvalidKeySignal(message)) ||
     status === 401 ||
-    status === 403 ||
-    (provider === "gemini" && status === 400)
+    (status === 403 && hasInvalidOrBlockedKeySignal(message))
   ) {
-    return new NormalizedAiError("AI_AUTHENTICATION_FAILED", 403, false);
+    return new NormalizedAiError(
+      "AI_AUTHENTICATION_FAILED",
+      401,
+      false,
+      status,
+    );
   }
-  if (status === 408 || name.includes("Timeout")) {
-    return new NormalizedAiError("AI_PROVIDER_TIMEOUT", 504, true);
+  if (status === 408 || name.toLowerCase().includes("timeout")) {
+    return new NormalizedAiError("AI_PROVIDER_TIMEOUT", 504, true, status);
   }
   if (status === 429) {
-    return new NormalizedAiError("RATE_LIMITED", 429, true);
+    if (hasQuotaSignal(message)) {
+      return new NormalizedAiError(
+        "AI_PROVIDER_QUOTA_EXCEEDED",
+        429,
+        false,
+        status,
+      );
+    }
+
+    return new NormalizedAiError("RATE_LIMITED", 429, true, status);
+  }
+  if (status === 404 && hasUnavailableModelSignal(message)) {
+    return new NormalizedAiError("AI_PROVIDER_UNAVAILABLE", 503, true, status);
   }
   if (status !== undefined && status >= 500) {
-    return new NormalizedAiError("AI_PROVIDER_UNAVAILABLE", 503, true);
+    return new NormalizedAiError("AI_PROVIDER_UNAVAILABLE", 503, true, status);
   }
 
-  return new NormalizedAiError("AI_PROVIDER_UNAVAILABLE", 503, true);
+  return new NormalizedAiError("AI_PROVIDER_UNAVAILABLE", 503, true, status);
+}
+
+function hasInvalidKeySignal(message: string): boolean {
+  return /\b(?:api )?key\b.*\b(?:invalid|not valid|expired|revoked|disabled|blocked)\b|\b(?:invalid|expired|revoked|disabled|blocked)\b.*\b(?:api )?key\b/u.test(
+    message,
+  );
+}
+
+function hasInvalidOrBlockedKeySignal(message: string): boolean {
+  return (
+    hasInvalidKeySignal(message) ||
+    /\b(?:api )?key\b.*\b(?:not authorized|unauthorized)\b|\b(?:not authorized|unauthorized)\b.*\b(?:api )?key\b/u.test(
+      message,
+    )
+  );
+}
+
+function hasQuotaSignal(message: string): boolean {
+  return /\b(?:quota|billing|free tier|resource(?: has been)? exhausted|limit exceeded|insufficient quota)\b/u.test(
+    message,
+  );
+}
+
+function hasUnavailableModelSignal(message: string): boolean {
+  return /\bmodel\b.*\b(?:unavailable|not found|deprecated|no longer available)\b|\b(?:unavailable|not found|deprecated|no longer available)\b.*\bmodel\b/u.test(
+    message,
+  );
 }
 
 export function isAbortError(error: unknown): boolean {

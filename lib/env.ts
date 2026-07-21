@@ -9,12 +9,10 @@ const optionalEnvironmentValue = z.preprocess(
 
 const environmentSchema = z.object({
   OPENAI_MODEL: optionalEnvironmentValue,
-  GEMINI_MODEL: optionalEnvironmentValue,
   NEXT_PUBLIC_APP_NAME: z.string().trim().min(1).default("Nattapong AI Chat"),
 });
 
 export const env = environmentSchema.parse({
   OPENAI_MODEL: process.env.OPENAI_MODEL,
-  GEMINI_MODEL: process.env.GEMINI_MODEL,
   NEXT_PUBLIC_APP_NAME: process.env.NEXT_PUBLIC_APP_NAME,
 });
