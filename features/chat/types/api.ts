@@ -27,9 +27,23 @@ export type AiErrorCode =
   | "INVALID_AI_RESPONSE"
   | "INTERNAL_ERROR";
 
+export type ResponseDiagnostic = {
+  requestId: string;
+  provider: AiProvider;
+  providerTextLength: number;
+  normalizedTextLength: number;
+  streamedTextLength: number;
+  clientFinalTextLength: number | null;
+  chunkCount: number;
+  providerFinishReason: string;
+  wasCancelled: boolean;
+  durationMs: number;
+};
+
 export type ChatStreamEvent =
   | { type: "text_delta"; delta: string }
   | { type: "done" }
+  | { type: "diagnostic"; diagnostic: ResponseDiagnostic }
   | {
       type: "error";
       error: {

@@ -45,6 +45,11 @@ export function useChat(connection: AiConnection | null) {
               ),
             );
           },
+          onDiagnostic: (diagnostic) => {
+            if (process.env.NODE_ENV === "development") {
+              console.info("CourtFit response diagnostic", diagnostic);
+            }
+          },
         });
 
         setMessages((currentMessages) =>

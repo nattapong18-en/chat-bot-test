@@ -5,10 +5,10 @@ import { GoogleGenAI } from "@google/genai";
 import { getProviderModel } from "@/lib/ai/config";
 import { normalizeProviderError } from "@/lib/ai/errors";
 import { GEMINI_BASKETBALL_SHOE_ASSISTANT_INSTRUCTIONS } from "@/lib/ai/instructions";
-import type { ProviderAdapter } from "@/lib/ai/types";
+import type { ProviderAdapter, ProviderFinishReason } from "@/lib/ai/types";
 
 const GEMINI_RECOMMENDATION_TEMPERATURE = 0.3;
-const GEMINI_MAX_OUTPUT_TOKENS = 1_024;
+const GEMINI_MAX_OUTPUT_TOKENS = 2_048;
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/";
 
 export const streamGeminiResponse: ProviderAdapter = async function* ({
@@ -36,12 +36,37 @@ export const streamGeminiResponse: ProviderAdapter = async function* ({
       },
     });
 
+    let finishReason: ProviderFinishReason = "OTHER";
+
     for await (const chunk of stream) {
-      if (chunk.text) {
-        yield chunk.text;
+      for (const candidate of chunk.candidates ?? []) {
+        const text = candidate.content?.parts
+          ?.map((part) => (typeof part.text === "string" ? part.text : ""))
+          .join("");
+
+        if (text) {
+          yield { type: "text_delta", delta: text };
+        }
+        if (candidate.finishReason) {
+          finishReason = toProviderFinishReason(candidate.finishReason);
+        }
       }
     }
+
+    yield { type: "completed", finishReason };
   } catch (error) {
     throw normalizeProviderError(error, "gemini");
   }
 };
+
+function toProviderFinishReason(reason: string): ProviderFinishReason {
+  switch (reason) {
+    case "STOP":
+    case "MAX_TOKENS":
+    case "SAFETY":
+    case "RECITATION":
+      return reason;
+    default:
+      return "OTHER";
+  }
+}

@@ -6,6 +6,7 @@ import type {
   AiErrorCode,
   ChatErrorResponse,
   ChatStreamEvent,
+  ResponseDiagnostic,
 } from "@/features/chat/types/api";
 import type { ChatLanguage } from "@/features/chat/types/chat";
 import {
@@ -13,13 +14,9 @@ import {
   NormalizedAiError,
   toPublicAiError,
 } from "@/lib/ai/errors";
-import { getProviderModel } from "@/lib/ai/config";
-import { ASSISTANT_INSTRUCTIONS_VERSION } from "@/lib/ai/instructions";
-import {
-  normalizeAssistantResponse,
-  splitNormalizedResponse,
-} from "@/lib/ai/response-normalizer";
+import { normalizeAssistantResponse } from "@/lib/ai/response-normalizer";
 import { getProviderAdapter } from "@/lib/ai/router";
+import type { ProviderFinishReason } from "@/lib/ai/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,58 +50,69 @@ export async function POST(request: Request) {
   const startedAt = performance.now();
   const encoder = new TextEncoder();
 
-  logDevelopmentDiagnostic({
-    requestId,
-    provider,
-    adapter: provider,
-    authenticationFailed: false,
-    event: "adapter_selected",
-    model: getProviderModel(provider),
-    providerStatus: null,
-    durationMs: 0,
-  });
-
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      try {
-        let providerResponse = "";
+      let providerResponse = "";
+      let providerFinishReason: ProviderFinishReason = "OTHER";
+      let providerChunkCount = 0;
+      let normalizedResponse = "";
+      let streamedTextLength = 0;
+      let wasCancelled = false;
 
-        for await (const delta of adapter({
+      try {
+        for await (const event of adapter({
           apiKey,
           messages,
           signal: request.signal,
         })) {
-          providerResponse += delta;
+          if (event.type === "text_delta") {
+            providerResponse += event.delta;
+            providerChunkCount += 1;
+          } else {
+            providerFinishReason = event.finishReason;
+          }
         }
 
         if (request.signal.aborted) {
+          wasCancelled = true;
           controller.close();
           return;
         }
 
-        const normalizedResponse = normalizeAssistantResponse(
-          providerResponse,
-          {
-            language,
-            messages,
-          },
-        );
+        normalizedResponse = normalizeAssistantResponse(providerResponse, {
+          language,
+          messages,
+        });
 
-        for (const delta of splitNormalizedResponse(normalizedResponse)) {
-          if (request.signal.aborted) {
-            controller.close();
-            return;
-          }
-
-          controller.enqueue(
-            encoder.encode(serializeEvent({ type: "text_delta", delta })),
-          );
+        if (request.signal.aborted) {
+          wasCancelled = true;
+          controller.close();
+          return;
         }
 
+        streamedTextLength = normalizedResponse.length;
+        controller.enqueue(
+          encoder.encode(
+            serializeEvent({ type: "text_delta", delta: normalizedResponse }),
+          ),
+        );
+        enqueueDevelopmentDiagnostic(controller, encoder, {
+          requestId,
+          provider,
+          providerTextLength: providerResponse.length,
+          normalizedTextLength: normalizedResponse.length,
+          streamedTextLength,
+          clientFinalTextLength: null,
+          chunkCount: providerChunkCount,
+          providerFinishReason,
+          wasCancelled,
+          durationMs: Math.round(performance.now() - startedAt),
+        });
         controller.enqueue(encoder.encode(serializeEvent({ type: "done" })));
         controller.close();
       } catch (error) {
-        if (request.signal.aborted || isAbortError(error)) {
+        wasCancelled = request.signal.aborted || isAbortError(error);
+        if (wasCancelled) {
           controller.close();
           return;
         }
@@ -113,20 +121,34 @@ export async function POST(request: Request) {
         logDevelopmentDiagnostic({
           requestId,
           provider,
-          adapter: provider,
-          authenticationFailed: isAuthenticationError(publicError.code),
-          event: "adapter_failed",
-          model: getProviderModel(provider),
-          providerStatus:
-            error instanceof NormalizedAiError
-              ? (error.providerStatus ?? null)
-              : null,
+          providerTextLength: providerResponse.length,
+          normalizedTextLength: normalizedResponse.length,
+          streamedTextLength,
+          clientFinalTextLength: null,
+          chunkCount: providerChunkCount,
+          providerFinishReason,
+          wasCancelled,
           durationMs: Math.round(performance.now() - startedAt),
         });
         controller.enqueue(
           encoder.encode(serializeEvent({ type: "error", error: publicError })),
         );
         controller.close();
+      } finally {
+        if (wasCancelled) {
+          logDevelopmentDiagnostic({
+            requestId,
+            provider,
+            providerTextLength: providerResponse.length,
+            normalizedTextLength: normalizedResponse.length,
+            streamedTextLength,
+            clientFinalTextLength: null,
+            chunkCount: providerChunkCount,
+            providerFinishReason,
+            wasCancelled,
+            durationMs: Math.round(performance.now() - startedAt),
+          });
+        }
       }
     },
   });
@@ -134,48 +156,29 @@ export async function POST(request: Request) {
   return new Response(stream, {
     headers: {
       ...NO_STORE_HEADERS,
-      ...developmentDiagnosticHeaders(provider, requestId),
       "Content-Type": "application/x-ndjson; charset=utf-8",
     },
   });
 }
 
-function developmentDiagnosticHeaders(
-  provider: string,
-  requestId: string,
-): HeadersInit {
-  if (process.env.NODE_ENV !== "development") {
-    return {};
-  }
-
-  return {
-    "X-AI-Provider": provider,
-    "X-AI-Adapter": provider,
-    "X-Request-ID": requestId,
-    "X-Assistant-Instructions-Attached": "true",
-    "X-Assistant-Instructions-Version": ASSISTANT_INSTRUCTIONS_VERSION,
-  };
-}
-
-type DevelopmentDiagnostic = {
-  requestId: string;
-  provider: string;
-  adapter: string;
-  authenticationFailed: boolean;
-  durationMs: number;
-  event: "adapter_selected" | "adapter_failed";
-  model: string;
-  providerStatus: number | null;
-};
-
-function logDevelopmentDiagnostic(diagnostic: DevelopmentDiagnostic) {
+function logDevelopmentDiagnostic(diagnostic: ResponseDiagnostic) {
   if (process.env.NODE_ENV === "development") {
-    console.info("AI provider diagnostic", diagnostic);
+    console.info("CourtFit response diagnostic", diagnostic);
   }
 }
 
-function isAuthenticationError(code: AiErrorCode): boolean {
-  return code === "AI_AUTHENTICATION_FAILED" || code === "INVALID_API_KEY";
+function enqueueDevelopmentDiagnostic(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  diagnostic: ResponseDiagnostic,
+) {
+  logDevelopmentDiagnostic(diagnostic);
+
+  if (process.env.NODE_ENV === "development") {
+    controller.enqueue(
+      encoder.encode(serializeEvent({ type: "diagnostic", diagnostic })),
+    );
+  }
 }
 
 function serializeEvent(event: ChatStreamEvent): string {

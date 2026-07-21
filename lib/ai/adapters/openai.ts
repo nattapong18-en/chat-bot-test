@@ -5,7 +5,7 @@ import OpenAI from "openai";
 import { getProviderModel } from "@/lib/ai/config";
 import { normalizeProviderError } from "@/lib/ai/errors";
 import { BASKETBALL_SHOE_ASSISTANT_INSTRUCTIONS } from "@/lib/ai/instructions";
-import type { ProviderAdapter } from "@/lib/ai/types";
+import type { ProviderAdapter, ProviderFinishReason } from "@/lib/ai/types";
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 
@@ -29,12 +29,32 @@ export const streamOpenAiResponse: ProviderAdapter = async function* ({
       { signal, maxRetries: 0 },
     );
 
+    let finishReason: ProviderFinishReason = "OTHER";
+
     for await (const event of stream) {
       if (event.type === "response.output_text.delta" && event.delta) {
-        yield event.delta;
+        yield { type: "text_delta", delta: event.delta };
+      }
+      if (
+        event.type === "response.completed" ||
+        event.type === "response.incomplete"
+      ) {
+        finishReason = toProviderFinishReason(
+          event.response.incomplete_details?.reason,
+        );
       }
     }
+
+    yield { type: "completed", finishReason };
   } catch (error) {
     throw normalizeProviderError(error, "openai");
   }
 };
+
+function toProviderFinishReason(
+  reason: "max_output_tokens" | "content_filter" | undefined,
+): ProviderFinishReason {
+  if (reason === "max_output_tokens") return "MAX_TOKENS";
+  if (reason === "content_filter") return "SAFETY";
+  return "STOP";
+}

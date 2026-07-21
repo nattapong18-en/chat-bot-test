@@ -6,7 +6,18 @@ export type ProviderStreamRequest = {
   signal: AbortSignal;
 };
 
-export type ProviderTextStream = AsyncGenerator<string, void, undefined>;
+export type ProviderFinishReason =
+  "STOP" | "MAX_TOKENS" | "SAFETY" | "RECITATION" | "OTHER";
+
+export type ProviderStreamEvent =
+  | { type: "text_delta"; delta: string }
+  | { type: "completed"; finishReason: ProviderFinishReason };
+
+export type ProviderTextStream = AsyncGenerator<
+  ProviderStreamEvent,
+  void,
+  undefined
+>;
 
 export type ProviderAdapter = (
   request: ProviderStreamRequest,

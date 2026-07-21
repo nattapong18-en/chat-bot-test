@@ -3,6 +3,7 @@ import type {
   AiErrorCode,
   ChatErrorResponse,
   ChatRequestMessage,
+  ResponseDiagnostic,
   ChatStreamEvent,
 } from "@/features/chat/types/api";
 
@@ -11,6 +12,7 @@ type StreamChatOptions = {
   messages: ChatRequestMessage[];
   signal: AbortSignal;
   onChunk: (chunk: string) => void;
+  onDiagnostic?: (diagnostic: ResponseDiagnostic) => void;
 };
 
 export class ChatClientError extends Error {
@@ -29,6 +31,7 @@ export async function streamChatResponse({
   messages,
   signal,
   onChunk,
+  onDiagnostic,
 }: StreamChatOptions): Promise<void> {
   const response = await fetch("/api/chat", {
     method: "POST",
@@ -56,6 +59,8 @@ export async function streamChatResponse({
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let clientFinalTextLength = 0;
+  let chunkCount = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -71,14 +76,40 @@ export async function streamChatResponse({
     buffer = lines.pop() ?? "";
 
     for (const line of lines) {
-      handleStreamEvent(parseStreamEvent(line), onChunk);
+      handleStreamEvent(parseStreamEvent(line), {
+        onChunk: (chunk) => {
+          clientFinalTextLength += chunk.length;
+          chunkCount += 1;
+          onChunk(chunk);
+        },
+        onDiagnostic: (diagnostic) => {
+          onDiagnostic?.({
+            ...diagnostic,
+            clientFinalTextLength,
+            chunkCount,
+          });
+        },
+      });
     }
 
     if (done) break;
   }
 
   if (buffer.trim()) {
-    handleStreamEvent(parseStreamEvent(buffer), onChunk);
+    handleStreamEvent(parseStreamEvent(buffer), {
+      onChunk: (chunk) => {
+        clientFinalTextLength += chunk.length;
+        chunkCount += 1;
+        onChunk(chunk);
+      },
+      onDiagnostic: (diagnostic) => {
+        onDiagnostic?.({
+          ...diagnostic,
+          clientFinalTextLength,
+          chunkCount,
+        });
+      },
+    });
   }
 }
 
@@ -96,10 +127,15 @@ function parseStreamEvent(line: string): ChatStreamEvent {
 
 function handleStreamEvent(
   event: ChatStreamEvent,
-  onChunk: (chunk: string) => void,
+  callbacks: {
+    onChunk: (chunk: string) => void;
+    onDiagnostic: (diagnostic: ResponseDiagnostic) => void;
+  },
 ) {
   if (event.type === "text_delta") {
-    onChunk(event.delta);
+    callbacks.onChunk(event.delta);
+  } else if (event.type === "diagnostic") {
+    callbacks.onDiagnostic(event.diagnostic);
   } else if (event.type === "error") {
     throw new ChatClientError(
       event.error.message,
