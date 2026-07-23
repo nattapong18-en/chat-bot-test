@@ -15,6 +15,9 @@
   --border: oklch(0.91 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.55 0 0);
+  --accent: oklch(0.65 0.18 43);
+  --accent-foreground: oklch(0.98 0 0);
+  --accent-muted: oklch(0.75 0.12 43);
   --sidebar: oklch(0.97 0 0);
   --sidebar-foreground: oklch(0.205 0 0);
   --sidebar-accent: oklch(0.935 0 0);
@@ -42,6 +45,9 @@
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.65 0 0);
+  --accent: oklch(0.75 0.18 43);
+  --accent-foreground: oklch(0.15 0 0);
+  --accent-muted: oklch(0.55 0.15 43);
   --sidebar: oklch(0.17 0 0);
   --sidebar-foreground: oklch(0.93 0 0);
   --sidebar-accent: oklch(0.235 0 0);
@@ -55,7 +61,29 @@
   --code-border: oklch(0.28 0 0);
 }
 
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @theme inline {
+  --animate-fade-in: fade-in 0.5s ease-out;
+  --animate-slide-up: slide-up 0.5s ease-out;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -68,6 +96,9 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-muted: var(--accent-muted);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-accent: var(--sidebar-accent);

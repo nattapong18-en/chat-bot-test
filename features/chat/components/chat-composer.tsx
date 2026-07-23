@@ -95,7 +95,7 @@ export function ChatComposer({
           <div className="flex items-center justify-between gap-3 px-1 pb-1">
             <span
               id="composer-hint"
-              className="text-muted-foreground truncate px-1 text-xs"
+              className="text-muted-foreground hidden truncate px-1 text-xs sm:block"
             >
               Enter เพื่อส่ง · Shift + Enter เพื่อขึ้นบรรทัดใหม่
             </span>

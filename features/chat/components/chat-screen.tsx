@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowDownIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowLeftIcon } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
@@ -18,18 +19,54 @@ import type { AiProvider } from "@/features/chat/types/ai";
 
 type ChatScreenProps = {
   preview?: string;
+  initialDraft?: string;
+  showStorefrontBar?: boolean;
 };
 
-export function ChatScreen({ preview }: ChatScreenProps) {
+export function ChatScreen({
+  preview,
+  initialDraft,
+  showStorefrontBar,
+}: ChatScreenProps) {
   if (preview) {
-    return <StaticPreviewScreen preview={preview} />;
+    return (
+      <StaticPreviewScreen
+        preview={preview}
+        showStorefrontBar={showStorefrontBar}
+      />
+    );
   }
 
-  return <InteractiveChatScreen />;
+  return (
+    <InteractiveChatScreen
+      initialDraft={initialDraft}
+      showStorefrontBar={showStorefrontBar}
+    />
+  );
 }
 
-function InteractiveChatScreen() {
-  const [draft, setDraft] = useState("");
+function StorefrontBar() {
+  return (
+    <div className="border-border/60 bg-background flex shrink-0 items-center border-b px-3 py-1.5">
+      <Link
+        href="/"
+        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+      >
+        <ArrowLeftIcon className="size-3" aria-hidden="true" />
+        กลับไปหน้าร้านค้า
+      </Link>
+    </div>
+  );
+}
+
+function InteractiveChatScreen({
+  initialDraft,
+  showStorefrontBar,
+}: {
+  initialDraft?: string;
+  showStorefrontBar?: boolean;
+}) {
+  const [draft, setDraft] = useState(initialDraft ?? "");
   const [connection, setConnection] = useState<AiConnection | null>(null);
   const [setupProvider, setSetupProvider] = useState<AiProvider | null>(null);
   const {
@@ -82,6 +119,7 @@ function InteractiveChatScreen() {
       onChangeProvider={changeProvider}
     >
       <main className="bg-background relative flex h-dvh min-w-0 flex-col">
+        {showStorefrontBar && <StorefrontBar />}
         <ChatHeader
           provider={connection?.provider}
           onClearConnection={connection ? changeKey : undefined}
@@ -142,12 +180,19 @@ function InteractiveChatScreen() {
   );
 }
 
-function StaticPreviewScreen({ preview }: { preview: string }) {
+function StaticPreviewScreen({
+  preview,
+  showStorefrontBar,
+}: {
+  preview: string;
+  showStorefrontBar?: boolean;
+}) {
   const showConversation = preview === "conversation" || preview === "disabled";
 
   return (
     <AppShell>
       <main className="bg-background flex h-dvh min-w-0 flex-col">
+        {showStorefrontBar && <StorefrontBar />}
         <ChatHeader navigationOpen={preview === "drawer"} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           {showConversation ? (

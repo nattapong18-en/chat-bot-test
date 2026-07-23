@@ -122,7 +122,7 @@ export function MessageItem({
         ) : (
           <>
             {message.content ? (
-              <MessageContent content={message.content} />
+              <MessageContent content={message.content} isUser={isUser} />
             ) : isStopped ? (
               <p className="text-muted-foreground text-sm">
                 {isThai
